@@ -44,7 +44,8 @@ jobs:
           sudo chmod +x gradlew
           ./gradlew clean build -x test
           cp ./build/libs/*.jar .
-          docker build --file Dockerfile --tag=${ECR_REGISTRY}/${SERVICE_NAME}:latest --rm=true .
+          ls -la
+          docker build --tag=${ECR_REGISTRY}/${SERVICE_NAME}:latest --rm=true .
           docker tag ${ECR_REGISTRY}/${SERVICE_NAME}:latest ${ECR_REGISTRY}/${SERVICE_NAME}:v0.1.${RUN_NUMBER}-${SHA_SHORT}
           docker save -o ${SERVICE_NAME}.v0.1.${RUN_NUMBER}-${SHA_SHORT}.tar ${ECR_REGISTRY}/${SERVICE_NAME}:latest
           ls -la
