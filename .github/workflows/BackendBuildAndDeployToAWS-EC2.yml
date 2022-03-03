@@ -1,0 +1,91 @@
+name: Deploy to AWS EC2
+env:
+  AWS_EC2_PUBLIC_IP: kps-dev.sytes.net
+  AWS_EC2_USERNAME: ubuntu
+  AWS_REGION: eu-west-2
+  SERVICE_NAME: service-registry
+  SERVICE_PORT: 8761
+  LOGSTASH_URI: "udp://edutest-server:5000"
+on:
+  push:
+    branches:
+      - develop
+jobs:
+  merge_job:
+    name: Build, Push and Deploy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+          
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v1
+        
+      - name: Extract project informations
+        id: version
+        run: |
+          echo ::set-output name=sha_short::$(git rev-parse --short HEAD)
+          echo ::set-output name=ECR_REGISTRY::${{ steps.login-ecr.outputs.registry }}
+          
+      - name: Build the Docker image
+        env:
+          ECR_REGISTRY: ${{ steps.version.outputs.ECR_REGISTRY }}
+          SERVICE_NAME: ${{ env.SERVICE_NAME }}
+          RUN_NUMBER: ${{ github.run_number }}
+          SHA_SHORT: ${{ steps.version.outputs.sha_short }}
+        run: |
+          pwd
+          sudo chmod +x gradlew
+          ./gradlew clean build -x test
+          cp ./build/libs/*.jar .
+          docker build --file Dockerfile --tag=${ECR_REGISTRY}/${SERVICE_NAME}:latest --rm=true .
+          docker tag ${ECR_REGISTRY}/${SERVICE_NAME}:latest ${ECR_REGISTRY}/${SERVICE_NAME}:v0.1.${RUN_NUMBER}-${SHA_SHORT}
+          docker save -o ${SERVICE_NAME}.v0.1.${RUN_NUMBER}-${SHA_SHORT}.tar ${ECR_REGISTRY}/${SERVICE_NAME}:latest
+          ls -la
+          docker images
+          
+      - name: scp docker image to EC2
+        uses: appleboy/scp-action@master
+        with:
+          host: ${{ env.AWS_EC2_PUBLIC_IP }}
+          username: ${{ env.AWS_EC2_USERNAME }}
+          key: ${{ secrets.AWS_EC2_PEM }}
+          port: 22
+          overwrite: true
+          source: "*.tar"
+          target: /home/ubuntu/kps/docker_images/${{ env.SERVICE_NAME }}
+          
+      - name: Push to AWS-ECR
+        env:
+          ECR_REGISTRY: ${{ steps.version.outputs.ECR_REGISTRY }}
+          SERVICE_NAME: ${{ env.SERVICE_NAME }}
+          RUN_NUMBER: ${{ github.run_number }}
+          SHA_SHORT: ${{ steps.version.outputs.sha_short }}
+        run: |
+          docker push ${ECR_REGISTRY}/${SERVICE_NAME}:latest
+          docker push ${ECR_REGISTRY}/${SERVICE_NAME}:v0.1.${RUN_NUMBER}-${SHA_SHORT}
+          
+      - name: Deploy to EC2 - executing remote ssh commands
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ env.AWS_EC2_PUBLIC_IP }}
+          username: ${{ env.AWS_EC2_USERNAME }}
+          key: ${{ secrets.AWS_EC2_PEM }}
+          port: 22
+          script: |
+            SERVICE_NAME=${{ env.SERVICE_NAME }}
+            AWS_REGION=${{ env.AWS_REGION }}
+            SERVICE_PORT=${{ env.SERVICE_PORT }}
+            LOGSTASH_URI=${{ env.LOGSTASH_URI }}
+            ECR_REGISTRY=${{ steps.version.outputs.ECR_REGISTRY }}
+            aws ecr get-login-password --region ${AWS_REGION} | sudo docker login --username AWS --password-stdin ${ECR_REGISTRY}
+            sudo docker pull ${ECR_REGISTRY}/${SERVICE_NAME}:latest
+            sudo docker rmi $(docker images -f "dangling=true" -q) || true
+            sudo docker images
+            sudo docker ps -a 
