@@ -32,6 +32,7 @@ jobs:
         run: |
           echo ::set-output name=sha_short::$(git rev-parse --short HEAD)
           echo ::set-output name=ECR_REGISTRY::${{ steps.login-ecr.outputs.registry }}
+          echo ::set-output name=BRANCH::$(echo ${GITHUB_REF#refs/heads/})
           
       - name: Build the Docker image
         env:
@@ -39,15 +40,17 @@ jobs:
           SERVICE_NAME: ${{ env.SERVICE_NAME }}
           RUN_NUMBER: ${{ github.run_number }}
           SHA_SHORT: ${{ steps.version.outputs.sha_short }}
+          BRANCH: ${{ steps.version.outputs.BRANCH }}
         run: |
+          echo $BRANCH $BRANCH $BRANCH $BRANCH $BRANCH $BRANCH $BRANCH 
           pwd
           sudo chmod +x gradlew
           ./gradlew clean build -x test
           cp ./build/libs/*.jar .
           ls -la
-          docker build --tag=${ECR_REGISTRY}/${SERVICE_NAME}:latest --rm=true .
-          docker tag ${ECR_REGISTRY}/${SERVICE_NAME}:latest ${ECR_REGISTRY}/${SERVICE_NAME}:v0.1.${RUN_NUMBER}-${SHA_SHORT}
-          docker save -o ${SERVICE_NAME}.v0.1.${RUN_NUMBER}-${SHA_SHORT}.tar ${ECR_REGISTRY}/${SERVICE_NAME}:latest
+          docker build --tag=${ECR_REGISTRY}/${BRANCH}/${SERVICE_NAME}:latest --rm=true .
+          docker tag ${ECR_REGISTRY}/${BRANCH}/${SERVICE_NAME}:latest ${ECR_REGISTRY}/${BRANCH}/${SERVICE_NAME}:v0.1.${RUN_NUMBER}-${SHA_SHORT}
+          docker save -o ${BRANCH}.${SERVICE_NAME}.v0.1.${RUN_NUMBER}-${SHA_SHORT}.tar ${ECR_REGISTRY}/${BRANCH}/${SERVICE_NAME}:latest
           ls -la
           docker images
           
@@ -60,17 +63,28 @@ jobs:
           port: 22
           overwrite: true
           source: "*.tar"
-          target: /home/ubuntu/kps/docker_images/${{ env.SERVICE_NAME }}
-          
+          target: /home/ubuntu/kps/docker_images/${BRANCH}-${{ env.SERVICE_NAME }}
+       
+      - name: Create AWS-ECR
+        uses: int128/create-ecr-repository-action@v1
+        id: ecr
+        env:
+          ECR_REGISTRY: ${{ steps.version.outputs.ECR_REGISTRY }}
+          SERVICE_NAME: ${{ env.SERVICE_NAME }}
+          BRANCH: ${{ steps.version.outputs.BRANCH }}
+        with:
+          repository: ${ECR_REGISTRY}/${BRANCH}/${SERVICE_NAME}
+        
       - name: Push to AWS-ECR
         env:
           ECR_REGISTRY: ${{ steps.version.outputs.ECR_REGISTRY }}
           SERVICE_NAME: ${{ env.SERVICE_NAME }}
           RUN_NUMBER: ${{ github.run_number }}
           SHA_SHORT: ${{ steps.version.outputs.sha_short }}
+          BRANCH: ${{ steps.version.outputs.BRANCH }}
         run: |
-          docker push ${ECR_REGISTRY}/${SERVICE_NAME}:latest
-          docker push ${ECR_REGISTRY}/${SERVICE_NAME}:v0.1.${RUN_NUMBER}-${SHA_SHORT}
+          docker push ${ECR_REGISTRY}/${BRANCH}/${SERVICE_NAME}:latest
+          docker push ${ECR_REGISTRY}/${BRANCH}/${SERVICE_NAME}:v0.1.${RUN_NUMBER}-${SHA_SHORT}
           
       - name: Deploy to EC2 - executing remote ssh commands
         uses: appleboy/ssh-action@master
@@ -81,12 +95,13 @@ jobs:
           port: 22
           script: |
             SERVICE_NAME=${{ env.SERVICE_NAME }}
+            BRANCH: ${{ steps.version.outputs.BRANCH }}
             AWS_REGION=${{ env.AWS_REGION }}
             SERVICE_PORT=${{ env.SERVICE_PORT }}
             LOGSTASH_URI=${{ env.LOGSTASH_URI }}
             ECR_REGISTRY=${{ steps.version.outputs.ECR_REGISTRY }}
             aws ecr get-login-password --region ${AWS_REGION} | sudo docker login --username AWS --password-stdin ${ECR_REGISTRY}
-            sudo docker pull ${ECR_REGISTRY}/${SERVICE_NAME}:latest
+            sudo docker pull ${ECR_REGISTRY}/${BRANCH}/${SERVICE_NAME}:latest
             sudo docker rmi $(docker images -f "dangling=true" -q) || true
             sudo docker images
             sudo docker ps -a 
