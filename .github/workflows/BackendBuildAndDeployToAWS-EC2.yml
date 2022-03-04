@@ -73,7 +73,7 @@ jobs:
           SERVICE_NAME: ${{ env.SERVICE_NAME }}
           BRANCH: ${{ steps.version.outputs.BRANCH }}
         with:
-          repository: ${ECR_REGISTRY}/${BRANCH}/${SERVICE_NAME}
+          repository: "${ECR_REGISTRY}/${BRANCH}/${SERVICE_NAME}"
         
       - name: Push to AWS-ECR
         env:
