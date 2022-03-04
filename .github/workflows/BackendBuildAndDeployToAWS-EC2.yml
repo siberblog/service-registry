@@ -42,7 +42,6 @@ jobs:
           SHA_SHORT: ${{ steps.version.outputs.sha_short }}
           BRANCH: ${{ steps.version.outputs.BRANCH }}
         run: |
-          echo $BRANCH $BRANCH $BRANCH $BRANCH $BRANCH $BRANCH $BRANCH 
           pwd
           sudo chmod +x gradlew
           ./gradlew clean build -x test
@@ -69,7 +68,7 @@ jobs:
         uses: int128/create-ecr-repository-action@v1
         id: ecr
         with:
-          repository: "${{ steps.version.outputs.ECR_REGISTRY }}/${{ steps.version.outputs.BRANCH }}/${{ env.SERVICE_NAME }}"
+          repository: "${{ steps.version.outputs.BRANCH }}/${{ env.SERVICE_NAME }}"
         
       - name: Push to AWS-ECR
         env:
